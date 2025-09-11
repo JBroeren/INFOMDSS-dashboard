@@ -1,0 +1,8 @@
+Flask
+pandas
+plotly
+psycopg2-binary 
+sqlalchemy 
+pulp 
+country_converter
+python-gnupg
