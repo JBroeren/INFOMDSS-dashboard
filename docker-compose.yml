@@ -1,9 +1,8 @@
 services:
-
     flask-app:
         build:
             context: .
-            dockerfile: dashboard/Dockerfile_dashboard # Specify the unique Dockerfile name
+            dockerfile: dashboard/Dockerfile_dashboard
         ports:
             - 8080:5000
         volumes:
@@ -12,26 +11,17 @@ services:
         environment:
             - NAME=Flask-App
             - PYTHONPATH=/app
+            # Database connection strings
+            - POSTGRES_URL=postgresql://student:infomdss@db_dashboard:5432/dashboard
+            - MONGODB_URL=mongodb://mongo:27017/knrb_dashboard
         working_dir: /app
         depends_on:
             db_dashboard:
                 condition: service_healthy
+            mongo:
+                condition: service_healthy
 
-    jupyter:
-        build:
-            context: .
-            dockerfile: notebook/Dockerfile_notebook
-        ports:
-            - 8888:8888
-        volumes:
-            - ./notebook:/notebook
-            - ./data:/data
-        environment:
-            - JUPYTER_ENABLE_LAB=yes
-            - NB_USER=infomdss
-            - CHOWN_HOME=yes
-        working_dir: /notebook
-
+    # PostgreSQL Database (legacy/backup)
     db_dashboard:
         image: postgres
         ports:
@@ -44,11 +34,118 @@ services:
             - db_dashboard-data:/var/lib/postgresql/data/
         container_name: db_dashboard
         healthcheck:
-            test: [ "CMD-SHELL", "pg_isready", "-d", "db_prod" ]
+            test: [ "CMD-SHELL", "pg_isready -U student -d dashboard" ]
             interval: 3s
             timeout: 60s
             retries: 10
             start_period: 80s
 
+    # MongoDB Database (primary)
+    mongo:
+        image: mongo:7
+        ports:
+            - 27017:27017
+        environment:
+            - MONGO_INITDB_DATABASE=knrb_dashboard
+        volumes:
+            - mongo-data:/data/db
+            - ./mongo-init:/docker-entrypoint-initdb.d
+        container_name: mongo_dashboard
+        healthcheck:
+            test: [ "CMD", "mongosh", "--eval", "db.adminCommand('ping')" ]
+            interval: 10s
+            timeout: 5s
+            retries: 5
+            start_period: 40s
+
+    # MongoDB Web Interface
+    mongo-express:
+        image: mongo-express:1.0
+        ports:
+            - 8082:8081
+        environment:
+            - ME_CONFIG_MONGODB_SERVER=mongo
+            - ME_CONFIG_MONGODB_PORT=27017
+            - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
+            # Remove basic auth for simplicity
+            - ME_CONFIG_BASICAUTH=false
+        depends_on:
+            mongo:
+                condition: service_healthy
+        container_name: mongo_express
+
+    # PostgreSQL Web Interface (for migration verification)
+    adminer:
+        image: adminer:4.8.1
+        ports:
+            - 8081:8080
+        environment:
+            - ADMINER_DEFAULT_SERVER=db_dashboard
+            - ADMINER_DEFAULT_USER=student
+            - ADMINER_DEFAULT_PASSWORD=infomdss
+            - ADMINER_DEFAULT_DB=dashboard
+        depends_on:
+            db_dashboard:
+                condition: service_healthy
+        container_name: adminer
+
+    # Migration Service (run once)
+    # to run migration, docker compose --profile migration up migration
+    migration:
+        build:
+            context: .
+            dockerfile: migration/Dockerfile
+        environment:
+            - POSTGRES_URL=postgresql://student:infomdss@db_dashboard:5432/dashboard
+            - MONGODB_URL=mongodb://mongo:27017/knrb_dashboard
+        volumes:
+            - ./migration:/app
+            - ./logs:/app/logs
+        depends_on:
+            db_dashboard:
+                condition: service_healthy
+            mongo:
+                condition: service_healthy
+        profiles:
+            - migration
+        container_name: knrb_migration
+    # KNRB Scraper Service (run once or on-demand)
+    # docker compose --profile scraper run --rm knrb-scraper python knrb_scraper.py --workers 8 --pool-size 15
+    # docker compose --profile scraper run --rm knrb-scraper python knrb_scraper.py --tournament-mode
+    knrb-scraper:
+        build:
+            context: .
+            dockerfile: scraper/Dockerfile
+        environment:
+            # Database connection (using PostgreSQL for scraping)
+            - DB_HOST=db_dashboard
+            - DB_NAME=dashboard
+            - DB_USER=student
+            - DB_PASSWORD=infomdss
+            - DB_PORT=5432
+            # Optional proxy configuration
+            - PROXY_URL=${PROXY_URL:-}
+            # Scraper configuration
+            - PYTHONUNBUFFERED=1
+        volumes:
+            - ./scraper:/app
+            - ./logs:/app/logs
+        depends_on:
+            db_dashboard:
+                condition: service_healthy
+        profiles:
+            - scraper
+        container_name: knrb_scraper
+        # Override command for different scraping modes
+        # command: ["python", "knrb_scraper.py", "--workers", "8"]
+
 volumes:
     db_dashboard-data:
+        driver: local
+    mongo-data:
+        driver: local
+
+# Networks (optional - for better isolation)
+networks:
+    default:
+        driver: bridge

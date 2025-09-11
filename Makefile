@@ -1,6 +1,13 @@
 # Docker Compose Commands
 .PHONY: build up down restart logs clean
 
+# create venv
+venv:
+	python -m venv .venv
+	chmod +x .venv/bin/activate
+	.venv/bin/activate
+	pip install -r dashboard/requirements.txt
+
 # Build all services
 build:
 	docker-compose build
@@ -52,3 +59,42 @@ shell-jupyter:
 # Execute shell in database container
 shell-db:
 	docker-compose exec db_dashboard psql -U student -d dashboard
+
+# KNRB Scraper Commands
+.PHONY: scraper-install scraper-test scraper-run scraper-seasons scraper-tournaments scraper-matches scraper-persons scraper-klassementen
+
+# Install scraper dependencies
+scraper-install:
+	pip install -r requirements_scraper.txt
+
+# Test scraper setup
+scraper-test:
+	python test_scraper.py
+
+# Run complete scraper
+scraper-run:
+	python knrb_scraper.py
+
+# Run scraper with custom workers
+scraper-run-workers:
+	python knrb_scraper.py --workers 8
+
+# Run scraper without proxy (with rate limiting)
+scraper-run-no-proxy:
+	python knrb_scraper.py --no-proxy
+
+# Run specific scraper steps
+scraper-seasons:
+	python knrb_scraper.py --step seasons
+
+scraper-tournaments:
+	python knrb_scraper.py --step tournaments
+
+scraper-matches:
+	python knrb_scraper.py --step matches
+
+scraper-persons:
+	python knrb_scraper.py --step persons
+
+scraper-klassementen:
+	python knrb_scraper.py --step klassementen

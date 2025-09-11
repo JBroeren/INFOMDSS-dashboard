@@ -1,8 +1,25 @@
 Flask
 pandas
 plotly
-psycopg2-binary 
 sqlalchemy 
 pulp 
 country_converter
 python-gnupg
+matplotlib
+dotenv
+
+# KNRB Scraper Requirements
+# Core dependencies for the KNRB data scraper script
+
+# Database
+psycopg2-binary>=2.9.0
+
+# HTTP requests
+requests>=2.28.0
+urllib3>=1.26.0
+
+# Environment variables
+python-dotenv>=0.19.0
+
+# Type hints (for older Python versions)
+typing-extensions>=4.0.0
