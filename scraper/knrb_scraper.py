@@ -73,13 +73,20 @@ from contextlib import contextmanager
 load_dotenv()
 
 # Configure logging
+import os
+log_handlers = [logging.StreamHandler(sys.stdout)]
+
+# Try to create logs directory and file handler, fall back to stdout only if it fails
+try:
+    os.makedirs('logs', exist_ok=True)
+    log_handlers.append(logging.FileHandler('logs/knrb_scraper.log'))
+except (PermissionError, OSError) as e:
+    print(f"Warning: Could not create log file, logging to stdout only: {e}")
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout),
-        logging.FileHandler('knrb_scraper.log')
-    ]
+    handlers=log_handlers
 )
 logger = logging.getLogger(__name__)
 
@@ -99,6 +106,32 @@ def get_connection():
     """Create database connection"""
     return psycopg2.connect(**DB_CONFIG)
 
+def create_tables_if_not_exist():
+    """Create database tables if they don't exist"""
+    try:
+        # Read the schema file
+        schema_path = os.path.join(os.path.dirname(__file__), 'schema.sql')
+        with open(schema_path, 'r') as f:
+            schema_sql = f.read()
+        
+        # Execute the schema
+        conn = get_connection()
+        try:
+            with conn.cursor() as cursor:
+                cursor.execute(schema_sql)
+            conn.commit()
+            print("✅ Database tables created/verified successfully")
+        finally:
+            conn.close()
+            
+    except FileNotFoundError:
+        print("⚠️  Schema file not found, creating tables with inline SQL")
+        # Fallback: create tables with inline SQL
+        create_tables_inline()
+    except Exception as e:
+        print(f"❌ Error creating tables: {e}")
+        raise
+
 class KNRBDataScraper:
     """KNRB Data Scraper with progress tracking and optimized performance"""
     
@@ -108,6 +141,10 @@ class KNRBDataScraper:
         self.max_workers = max_workers
         self.connection_pool_size = connection_pool_size
         self.use_proxy = use_proxy
+        
+        # Create database tables if they don't exist
+        print("🔧 Setting up database tables...")
+        create_tables_if_not_exist()
         
         # Thread-safe person cache to avoid duplicate processing
         self.processed_persons: Set[str] = set()

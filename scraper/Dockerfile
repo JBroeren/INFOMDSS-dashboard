@@ -17,16 +17,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy scraper script and supporting files
 COPY scraper/ .
 
-# Create logs directory
-RUN mkdir -p logs
-
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
 
 # Create non-root user for security
 RUN groupadd -r scraper && useradd -r -g scraper scraper
-RUN chown -R scraper:scraper /app
+
+# Create logs directory and set proper ownership
+RUN mkdir -p logs && chown -R scraper:scraper /app && chmod 755 logs
 USER scraper
 
 # Default command (can be overridden)
