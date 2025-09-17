@@ -58,22 +58,6 @@ services:
             retries: 5
             start_period: 40s
 
-    # MongoDB Web Interface
-    mongo-express:
-        image: mongo-express:1.0
-        ports:
-            - 8082:8081
-        environment:
-            - ME_CONFIG_MONGODB_SERVER=mongo
-            - ME_CONFIG_MONGODB_PORT=27017
-            - ME_CONFIG_MONGODB_ENABLE_ADMIN=true
-            # Remove basic auth for simplicity
-            - ME_CONFIG_BASICAUTH=false
-        depends_on:
-            mongo:
-                condition: service_healthy
-        container_name: mongo_express
-
     # PostgreSQL Web Interface (for migration verification)
     adminer:
         image: adminer:4.8.1
@@ -89,55 +73,79 @@ services:
                 condition: service_healthy
         container_name: adminer
 
-    # Migration Service (run once)
-    # to run migration, docker compose --profile migration up migration
-    migration:
-        build:
-            context: .
-            dockerfile: migration/Dockerfile
-        environment:
-            - POSTGRES_URL=postgresql://student:infomdss@db_dashboard:5432/dashboard
-            - MONGODB_URL=mongodb://mongo:27017/knrb_dashboard
-        volumes:
-            - ./migration:/app
-            - ./logs:/app/logs
-        depends_on:
-            db_dashboard:
-                condition: service_healthy
-            mongo:
-                condition: service_healthy
-        profiles:
-            - migration
-        container_name: knrb_migration
     # KNRB Scraper Service (run once or on-demand)
-    # docker compose --profile scraper run --rm knrb-scraper python knrb_scraper.py --workers 8 --pool-size 15
-    # docker compose --profile scraper run --rm knrb-scraper python knrb_scraper.py --tournament-mode
+    # docker compose --profile scraper run --rm knrb-scraper
     knrb-scraper:
         build:
             context: .
-            dockerfile: scraper/Dockerfile
+            dockerfile: knrb_scraper/Dockerfile
         environment:
-            # Database connection (using PostgreSQL for scraping)
+            # JSON output configuration
+            - JSON_OUTPUT_DIR=/app/data/knrb_data
+            # Optional proxy configuration
+            - PROXY_URL=${PROXY_URL:-}
+            # Scraper configuration
+            - PYTHONUNBUFFERED=1
+            - MAX_WORKERS=${MAX_WORKERS:-8}
+        volumes:
+            - ./knrb_scraper:/app
+            - ./logs:/app/logs
+            - ./data:/app/data
+        profiles:
+            - scraper
+        container_name: knrb_scraper
+        # Default command runs the JSON scraper
+        # command: ["python", "knrb_scraper.py"]
+
+        # Time Team Scraper Service (run once or on-demand)
+        # docker compose --profile scraper run --rm time-team-scraper
+    time-team-scraper:
+        build:
+            context: .
+            dockerfile: time_team_scraper/Dockerfile
+        environment:
+            - JSON_OUTPUT_DIR=/app/data/time_team_data
+            - PROXY_URL=${PROXY_URL:-}
+            - PYTHONUNBUFFERED=1
+            - MAX_WORKERS=${MAX_WORKERS:-8}
+        volumes:
+            - ./time_team_scraper:/app
+            - ./logs:/app/logs
+            - ./data:/app/data
+        profiles:
+            - scraper
+        container_name: time_team_scraper
+        # Default command runs the JSON scraper
+        # command: ["python", "time_team_scraper.py"]
+
+        # JSON Importer Service (run once or on-demand)
+        # docker compose --profile importer run --rm json-importer
+    json-importer:
+        build:
+            context: .
+            dockerfile: json_importer/Dockerfile
+        environment:
+            # Database connection
             - DB_HOST=db_dashboard
             - DB_NAME=dashboard
             - DB_USER=student
             - DB_PASSWORD=infomdss
             - DB_PORT=5432
-            # Optional proxy configuration
-            - PROXY_URL=${PROXY_URL:-}
-            # Scraper configuration
+            # JSON data directories
+            - KNRB_DATA_DIR=/app/data/knrb_data
+            - TIME_TEAM_DATA_DIR=/app/data/time_team_data
             - PYTHONUNBUFFERED=1
         volumes:
-            - ./scraper:/app
-            - ./logs:/app/logs
+            - ./json_importer:/app
+            - ./data:/app/data
         depends_on:
             db_dashboard:
                 condition: service_healthy
         profiles:
-            - scraper
-        container_name: knrb_scraper
-        # Override command for different scraping modes
-        # command: ["python", "knrb_scraper.py", "--workers", "8"]
+            - importer
+        container_name: json_importer
+        # Default command shows help
+        # command: ["python", "json_importer.py", "--help"]
 
 volumes:
     db_dashboard-data:

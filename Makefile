@@ -60,41 +60,78 @@ shell-jupyter:
 shell-db:
 	docker-compose exec db_dashboard psql -U student -d dashboard
 
-# KNRB Scraper Commands
-.PHONY: scraper-install scraper-test scraper-run scraper-seasons scraper-tournaments scraper-matches scraper-persons scraper-klassementen
+# Scraper Commands
+.PHONY: scrape-knrb scrape-time-team scrape-all import-all import-knrb import-time-team create-tables migrate status clean-data
 
-# Install scraper dependencies
-scraper-install:
-	pip install -r requirements_scraper.txt
+# Run KNRB scraper (usage: make scrape-knrb WORKERS=16)
+scrape-knrb:
+	MAX_WORKERS=$(or $(WORKERS),10) docker compose --profile scraper run --rm knrb-scraper
 
-# Test scraper setup
-scraper-test:
-	python test_scraper.py
+# Run Time Team scraper (usage: make scrape-time-team WORKERS=16)
+scrape-time-team:
+	MAX_WORKERS=$(or $(WORKERS),10) docker compose --profile scraper run --rm time-team-scraper
 
-# Run complete scraper
-scraper-run:
-	python knrb_scraper.py
+# Run both scrapers (usage: make scrape-all WORKERS=16)
+scrape-all: scrape-knrb scrape-time-team
 
-# Run scraper with custom workers
-scraper-run-workers:
-	python knrb_scraper.py --workers 8
+# Import all JSON data to database
+import-all:
+	docker compose --profile importer run --rm json-importer python json_importer.py --source all
 
-# Run scraper without proxy (with rate limiting)
-scraper-run-no-proxy:
-	python knrb_scraper.py --no-proxy
+# Import only KNRB data
+import-knrb:
+	docker compose --profile importer run --rm json-importer python json_importer.py --source knrb
 
-# Run specific scraper steps
-scraper-seasons:
-	python knrb_scraper.py --step seasons
+# Import only Time Team data
+import-time-team:
+	docker compose --profile importer run --rm json-importer python json_importer.py --source time_team
 
-scraper-tournaments:
-	python knrb_scraper.py --step tournaments
+# Create database tables
+create-tables:
+	docker compose --profile importer run --rm json-importer python json_importer.py --create-tables --source all
 
-scraper-matches:
-	python knrb_scraper.py --step matches
+# Run database migrations
+migrate:
+	docker compose --profile importer run --rm json-importer alembic upgrade head
 
-scraper-persons:
-	python knrb_scraper.py --step persons
+# Show data status
+status:
+	@echo "=== JSON Data Status ==="
+	@if [ -d "data/knrb_data" ]; then \
+		echo "KNRB Data:"; \
+		find data/knrb_data -name "*.json" | wc -l | xargs echo "  Total JSON files:"; \
+		echo "  Seasons: $$(find data/knrb_data/seasons -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Tournaments: $$(find data/knrb_data/tournaments -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Matches: $$(find data/knrb_data/matches -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Races: $$(find data/knrb_data/races -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Persons: $$(find data/knrb_data/persons -name "*.json" 2>/dev/null | wc -l)"; \
+	else \
+		echo "KNRB Data: Not found"; \
+	fi
+	@echo ""
+	@if [ -d "data/time_team_data" ]; then \
+		echo "Time Team Data:"; \
+		find data/time_team_data -name "*.json" | wc -l | xargs echo "  Total JSON files:"; \
+		echo "  Regattas: $$(find data/time_team_data/regattas -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Events: $$(find data/time_team_data/events -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Races: $$(find data/time_team_data/races -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Entries: $$(find data/time_team_data/entries -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Clubs: $$(find data/time_team_data/clubs -name "*.json" 2>/dev/null | wc -l)"; \
+		echo "  Members: $$(find data/time_team_data/members -name "*.json" 2>/dev/null | wc -l)"; \
+	else \
+		echo "Time Team Data: Not found"; \
+	fi
+	@echo ""
+	@echo "=== Database Status ==="
+	@docker compose --profile importer run --rm json-importer python -c "from json_importer import JSONImporter; importer = JSONImporter(); summary = importer.get_import_summary(); [print(f'  {table}: {count:,} records') for table, count in summary.items()]"
 
-scraper-klassementen:
-	python knrb_scraper.py --step klassementen
+# Clean JSON data directories (interactive)
+clean-data:
+	@echo "This will remove all JSON data. Are you sure? (y/N)"; \
+	read response; \
+	if [ "$$response" = "y" ] || [ "$$response" = "Y" ]; then \
+		rm -rf data/knrb_data/* data/time_team_data/*; \
+		echo "Data directories cleaned"; \
+	else \
+		echo "Operation cancelled"; \
+	fi

@@ -1,25 +1,24 @@
-# KNRB Scraper Dockerfile
+# Time Team Scraper Dockerfile
 FROM python:3.11-slim
 
 WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    gcc \
-    libpq-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements and install Python dependencies
-COPY scraper/requirements.txt .
+COPY time_team_scraper/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy scraper script and supporting files
-COPY scraper/ .
+COPY time_team_scraper/ .
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
 ENV PYTHONPATH=/app
+ENV JSON_OUTPUT_DIR=/data/time_team_data
 
 # Create non-root user for security
 RUN groupadd -r scraper && useradd -r -g scraper scraper
@@ -29,4 +28,4 @@ RUN mkdir -p logs && chown -R scraper:scraper /app && chmod 755 logs
 USER scraper
 
 # Default command (can be overridden)
-CMD ["python", "knrb_scraper.py", "--help"]
+CMD ["python", "time_team_scraper.py"]
