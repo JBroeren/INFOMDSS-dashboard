@@ -49,28 +49,15 @@ The JSON Importer reads JSON files produced by the scrapers and writes them into
 Run from the repository root:
 
 ```bash
-docker build -t infomdss/json-importer -f json_importer/Dockerfile ./json_importer
+# enter the venv (if you haven't already)
+source .venv/bin/activate
+
+# install project requirements in your Python environment, if not already
+python -m pip install -r json_importer/requirements.txt
+
+# run alembic migrations
+python3 json_importer/json_importer.py
 ```
-
-### Run the container
-
-Example (replace values as needed):
-
-```bash
-docker run --rm \
-	-e DB_HOST=<your_db_host> \
-	-e DB_NAME=<your_db_name> \
-	-e DB_USER=<your_db_user> \
-	-e DB_PASSWORD=<your_db_password> \
-	-e DB_PORT=5432 \
-	-e KNRB_DATA_DIR=/data/knrb_data \
-	-e TIME_TEAM_DATA_DIR=/data/time_team_data \
-	-v $(pwd)/data:/data \
-	infomdss/json-importer
-```
-
-- The importer accepts `--source knrb|time_team|all` to select which JSON source(s) to import.
-- If you use a docker-compose setup you can mount `./data` into the container and pass the same environment variables.
 
 ### Environment variables used by the importer
 
