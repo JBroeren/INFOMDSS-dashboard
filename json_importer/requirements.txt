@@ -1,0 +1,12 @@
+# Requirements for JSON Importer
+
+# Core dependencies
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.7
+python-dotenv==1.0.0
+
+# Alembic for database migrations
+alembic==1.12.1
+
+# Additional utilities
+click==8.1.7

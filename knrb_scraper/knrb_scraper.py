@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python3
 """
 KNRB Data Scraper - JSON Output Version
@@ -158,18 +159,22 @@ class KNRBDataScraper:
             'Accept': 'application/json, text/plain, */*',
         })
         
-        # Configure proxy if available
+       # Configure proxy if available
         proxy_url = os.getenv('PROXY_URL')
-        if proxy_url:
-            session.proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-            logger.info(f"Using proxy: {proxy_url}")
-            # Disable SSL verification when using proxy to avoid certificate issues
-            session.verify = False
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        if not proxy_url:
+            raise Exception("PROXY_URL is not set. Do not run the scraper without a proxy.")
+
+        session.proxies = {
+            'http': proxy_url,
+            'https': proxy_url
+        }
+
+        logger.info(f"Using proxy: {proxy_url}")
+        # Disable SSL verification when using proxy to avoid certificate issues
+        session.verify = False
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         return session
 

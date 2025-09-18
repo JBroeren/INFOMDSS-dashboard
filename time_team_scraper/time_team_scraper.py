@@ -18,7 +18,6 @@ import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import uuid
-import time
 import json
 import requests
 from typing import List, Dict, Set, Optional
@@ -43,6 +42,8 @@ logger = logging.getLogger(__name__)
 JSON_OUTPUT_DIR = os.getenv('JSON_OUTPUT_DIR', './data/time_team_data')
 
 LOCALE_FILTER = os.getenv('LOCALE_FILTER', 'Europe/Amsterdam')
+
+import traceback
 
 class TimeTeamDataScraper:
     """Time Team Data Scraper with JSON Output"""
@@ -91,7 +92,6 @@ class TimeTeamDataScraper:
             'entries': self.output_dir / 'entries',
             'finals': self.output_dir / 'finals',
             'rounds': self.output_dir / 'rounds',
-            'communications': self.output_dir / 'communications',
             'clubs': self.output_dir / 'clubs',
             'members': self.output_dir / 'members',
             'metadata': self.output_dir / 'metadata',
@@ -124,26 +124,18 @@ class TimeTeamDataScraper:
                     raise
         raise TypeError(f"Unsupported UUID value type: {type(value)}")
 
-    def _fetch_json(self, url: str, params: Optional[Dict] = None, max_retries: int = 3) -> Optional[object]:
+    def _fetch_json(self, url: str, params: Optional[Dict] = None, max_retries: int = 2) -> Optional[object]:
         """Fetch JSON data from URL with retry logic"""
         for attempt in range(max_retries):
-            try:
-                response = self.session.get(url, params=params, timeout=30)
-                if response.status_code == 404:
-                    if attempt < max_retries - 1:
-                        logger.warning(f"404 error for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                        time.sleep(1)  # Wait 1 second before retry
-                        continue
-                    return None
-                response.raise_for_status()
-                return response.json()
-            except Exception as e:
+            response = self.session.get(url, params=params, timeout=30)
+            # print(response.headers)
+            if response.status_code == 404 and not response.headers.get('report-uri', '').startswith('frame-ancestors \'self\'; report-uri https://timeteam'):
                 if attempt < max_retries - 1:
-                    logger.warning(f"Failed to fetch {url} (attempt {attempt + 1}/{max_retries}): {e}")
-                    time.sleep(1)  # Wait 1 second before retry
+                    logger.warning(f"404 error for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
                     continue
-                logger.warning(f"Failed to fetch {url} after {max_retries} attempts: {e}")
                 return None
+            response.raise_for_status()
+            return response.json()
         return None
 
     def _write_json_file(self, data: object, file_path: Path, metadata: Optional[Dict] = None):
@@ -172,16 +164,20 @@ class TimeTeamDataScraper:
         
         # Configure proxy if available
         proxy_url = os.getenv('PROXY_URL')
-        if proxy_url:
-            session.proxies = {
-                'http': proxy_url,
-                'https': proxy_url
-            }
-            logger.info(f"Using proxy: {proxy_url}")
-            # Disable SSL verification when using proxy to avoid certificate issues
-            session.verify = False
-            import urllib3
-            urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+        if not proxy_url:
+            raise Exception("PROXY_URL is not set. Do not run the scraper without a proxy.")
+
+        session.proxies = {
+            'http': proxy_url,
+            'https': proxy_url
+        }
+
+        logger.info(f"Using proxy: {proxy_url}")
+        # Disable SSL verification when using proxy to avoid certificate issues
+        session.verify = False
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
         
         return session
 
@@ -205,16 +201,16 @@ class TimeTeamDataScraper:
         for regatta in regattas:
             regatta_id = self._to_uuid(regatta.get('id'))
             timezone = regatta.get('timezone')
-            if regatta_id and timezone == LOCALE_FILTER:
-                file_path = self.dirs['regattas'] / f"{regatta_id}.json"
-                self._write_json_file(regatta, file_path, {
-                    'type': 'regatta',
-                    'scanned': False
-                })
-                # create subdirectories for this regatta in all other directories
-                for dir_path in self.dirs.values():
-                    dir_path = dir_path / f"{regatta_id}"
-                    dir_path.mkdir(parents=True, exist_ok=True)
+            # if regatta_id and timezone == LOCALE_FILTER:
+            file_path = self.dirs['regattas'] / f"{regatta_id}.json"
+            self._write_json_file(regatta, file_path, {
+                'type': 'regatta',
+                'scanned': False
+            })
+            # create subdirectories for this regatta in all other directories
+            for dir_path in self.dirs.values():
+                dir_path = dir_path / f"{regatta_id}"
+                dir_path.mkdir(parents=True, exist_ok=True)
                 
         
         print(f"✅ Stored {len(regattas)} regattas")
@@ -256,7 +252,6 @@ class TimeTeamDataScraper:
                 # check if we already have races, events and/or communication for this regatta:
                 races_dir = self.dirs['races'] / f"{regatta_id}"
                 events_dir = self.dirs['events'] / f"{regatta_id}"
-                communication_dir = self.dirs['communications'] / f"{regatta_id}"
 
                 # Fetch regatta details
                 regatta_details = self._fetch_json(f"{self.base_url}/regatta/{regatta_id}")
@@ -271,7 +266,6 @@ class TimeTeamDataScraper:
 
                 event_count = 0
                 race_count = 0
-                comm_count = 0
 
                 # Fetch events
                 if not events_dir.exists() or not any(events_dir.iterdir()):
@@ -304,22 +298,6 @@ class TimeTeamDataScraper:
                                     'regatta_id': regatta_id
                                 })
                                 race_count += 1
-                
-                # Fetch communication
-                if not communication_dir.exists() or not any(communication_dir.iterdir()):
-                    communication_data = self._fetch_json(f"{self.base_url}/{regatta_id}/communication") or []
-
-                    # Store communication
-                    if len(communication_data) > 0:
-                        for comm in communication_data.get('communication', {}).values():
-                            comm_id = self._to_uuid(comm.get('id'))
-                            if comm_id:
-                                file_path = self.dirs['communications'] / f"{regatta_id}" / f"{comm_id}.json"
-                                self._write_json_file(comm, file_path, {
-                                    'type': 'communication',
-                                    'regatta_id': regatta_id
-                                })
-                                comm_count += 1           
                     
                 # Mark regatta as scanned
                 regatta_file = self.dirs['regattas'] / f"{regatta_id}.json"
@@ -330,36 +308,34 @@ class TimeTeamDataScraper:
                 with open(regatta_file, 'w', encoding='utf-8') as f:
                     json.dump(data, f, indent=2, ensure_ascii=False, default=str)
                 
-                print(f"    ✅ Stored {event_count} events, {race_count} races, {comm_count} communications")
-                return event_count, race_count, comm_count
+                print(f"    ✅ Stored {event_count} events, {race_count} races")
+                return event_count, race_count
                     
             except Exception as e:
                 logger.warning(f"Failed to process regatta {regatta_name}: {e}")
-                return 0, 0, 0
+            return 0, 0
         
         # Process regattas in parallel
         total_events = 0
         total_races = 0
-        total_communications = 0
         
         with ThreadPoolExecutor(max_workers=self.max_workers) as executor:
             future_to_regatta = {executor.submit(process_regatta, regatta): regatta for regatta in unscanned_regattas}
             
             for future in as_completed(future_to_regatta):
-                events, races, communications = future.result()
+                events, races = future.result()
                 total_events += events
                 total_races += races
-                total_communications += communications
         
-        print(f"✅ Total stored - Events: {total_events}, Races: {total_races}, Communications: {total_communications}")
+        print(f"✅ Total stored - Events: {total_events}, Races: {total_races}")
 
     def scrape_event_details(self):
         """Step 3: Scrape event details (entries, finals, rounds)"""
         print("🏁 Scraping event details...")
         
-        # Get all events from JSON files
-        event_files = list(self.dirs['events'].glob('*.json'))
-        
+        # Get all events from Regatta directories inside the events directory
+        event_files = list(self.dirs['events'].glob('*/*.json'))
+
         if not event_files:
             print("✅ No events found")
             return
@@ -372,107 +348,166 @@ class TimeTeamDataScraper:
                 with open(event_file_path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     event_data = data['data']
-                    event_id = event_file_path.stem
+                    event_id = event_data.get('id')
                     regatta_id = data.get('metadata', {}).get('regatta_id')
-                
+
+                # Get the regatta data from the regatta directory
+                regatta_file = self.dirs['regattas'] / f"{regatta_id}.json"
+                with open(regatta_file, 'r', encoding='utf-8') as f:
+                    regatta_data = json.load(f)
+                    regatta_data = regatta_data['data']
+                    regatta_code = regatta_data.get('code')
+                    regatta_year = regatta_data.get('year')
+
+                # if regatta_data.get('timezone') != LOCALE_FILTER:
+                #     return 0, 0, 0
+
+                if regatta_data.get('regatta_days') is None or len(regatta_data.get('regatta_days')) == 0:
+                    return 0, 0, 0
+
+                # Check if the event has taken place
+                for regatta_day in regatta_data.get('regatta_days'):
+                    if datetime.strptime(regatta_day.get('day_date'), '%Y-%m-%d') > datetime.now():
+                        return 0, 0, 0
+
                 # Extract original IDs
-                original_event_id = event_data.get('id')
-                original_regatta_id = event_data.get('metadata', {}).get('regatta_id')
+                original_event_id = event_id
+                original_regatta_id = regatta_id
                 
                 if not original_event_id or not original_regatta_id:
                     return 0, 0, 0
                 
-                # Fetch event entries
-                entries_data = self._fetch_json(f"{self.base_url}/{original_regatta_id}/event/{original_event_id}/entry") or []
-                
-                # Fetch event finals
-                finals_data = self._fetch_json(f"{self.base_url}/{original_regatta_id}/event/{original_event_id}/final")
-                
+                # Check if the event was already processed using the event id
+                entries_file = self.dirs['entries'] / f"{regatta_id}" / f"{event_id}.json"
+                final_results_file = self.dirs['final_results'] / f"{regatta_id}" / f"{regatta_id}_{event_id}.json"
+                rounds_file = self.dirs['rounds'] / f"{regatta_id}" / f"{event_id}.json"
+                if final_results_file.exists():
+                    # rename the file to {event_id}.json
+                    os.rename(final_results_file, self.dirs['final_results'] / f"{regatta_id}" / f"{event_id}.json")
+
+                final_results_file = self.dirs['final_results'] / f"{regatta_id}" / f"{event_id}.json"
+
+                if not entries_file.exists():
+                    # Fetch event entries
+                    entries_data = self._fetch_json(f"{self.base_url}/{original_regatta_id}/event/{original_event_id}/entry")
+                    
+                    # if not entries_data:
+                    #     entries_data = self._fetch_json(f"{self.base_url}/{regatta_code}/{regatta_year}/event/{original_event_id}/entry")
+
+                if not final_results_file.exists():
+                    # Fetch event finals
+                    finals_data = self._fetch_json(f"{self.base_url}/{original_regatta_id}/event/{original_event_id}/final")
+                    
+                    # if not finals_data:
+                    #     finals_data = self._fetch_json(f"{self.base_url}/{regatta_code}/{regatta_year}/event/{original_event_id}/final")
+
+                if final_results_file.exists() and not rounds_file.exists():
+                    # retrieve the data from the file
+                    with open(final_results_file, 'r', encoding='utf-8') as f:
+                        finals_data = json.load(f)
+                        finals_data = finals_data['data']
+
                 entry_count = 0
                 final_count = 0
                 round_count = 0
                 
                 # Store entries
-                for entry in entries_data.get('entry', {}).values():
-                    entry_id = self._to_uuid(entry.get('id'))
-                    if entry_id:
-                        file_path = self.dirs['entries'] / f"{regatta_id}" / f"{entry_id}.json"
-                        self._write_json_file(entry, file_path, {
-                            'type': 'entry',
-                            'event_id': event_id,
-                            'regatta_id': regatta_id
-                        })
-                        entry_count += 1
-                
-                # Process final results if available
-                if finals_data:
-                    # Store the main final results data
-                    final_id = f"{original_regatta_id}_{original_event_id}"
-                    final_results_file = self.dirs['final_results'] / f"{regatta_id}" / f"{final_id}.json"
-                    self._write_json_file(finals_data, final_results_file, {
-                        'type': 'final_results',
-                        'regatta_id': regatta_id,
-                        'event_id': event_id,
-                        'final_id': final_id
-                    })
-                    final_count += 1
-                    
-                    # Extract and store race crew data separately
-                    race_crews = finals_data.get('race_crew', {})
-                    for crew_id, crew_data in race_crews.items():
-                        crew_file = self.dirs['race_crews'] / f"{regatta_id}" / f"{crew_id}.json"
-                        self._write_json_file(crew_data, crew_file, {
-                            'type': 'race_crew',
-                            'regatta_id': regatta_id,
-                            'event_id': event_id,
-                            'race_id': crew_data.get('race_id'),
-                            'crew_id': crew_id
-                        })
-                        
-                        # Store detailed timing data
-                        times = crew_data.get('times', [])
-                        for time_data in times:
-                            time_id = f"{crew_id}_{time_data.get('location_id', 'unknown')}"
-                            time_file = self.dirs['crew_times'] / f"{regatta_id}" / f"{time_id}.json"
-                            self._write_json_file(time_data, time_file, {
-                                'type': 'crew_time',
-                                'crew_id': crew_id,
-                                'race_id': crew_data.get('race_id'),
-                                'regatta_id': regatta_id,
-                                'event_id': event_id
-                            })
-                    
-                    # Store ranking data if present
-                    event_ranking = finals_data.get('event_ranking', [])
-                    
-                    if event_ranking:
-                        ranking_file = self.dirs['rankings'] / f"{regatta_id}" / f"event_{original_event_id}.json"
-                        self._write_json_file(event_ranking, ranking_file, {
-                            'type': 'event_ranking',
-                            'event_id': original_event_id,
-                            'regatta_id': original_regatta_id
-                        })
-                
-                # Process rounds if they exist in the event data
-                for round_info in event_data.get('rounds', []):
-                    round_id = round_info.get('id')
-                    if round_id:
-                        round_data = self._fetch_json(f"{self.base_url}/{original_regatta_id}/event/{original_event_id}/round/{round_id}")
-                        if round_data:
-                            db_round_id = self._to_uuid(round_id)
-                            if db_round_id:
-                                file_path = self.dirs['rounds'] / f"{regatta_id}" / f"{db_round_id}.json"
-                                self._write_json_file(round_data, file_path, {
-                                    'type': 'round',
+                if entries_data and not entries_file.exists():
+                    # print the entry object if it is of type list
+                    if isinstance(entries_data.get('entry', {}), list):
+                        pass
+                    else:
+                        for entry in entries_data.get('entry', {}).values():
+                            entry_id = self._to_uuid(entry.get('id'))
+                            if entry_id:
+                                file_path = self.dirs['entries'] / f"{regatta_id}" / f"{entry_id}.json"
+                                self._write_json_file(entry, file_path, {
+                                    'type': 'entry',
                                     'event_id': event_id,
                                     'regatta_id': regatta_id
                                 })
-                                round_count += 1
+                                entry_count += 1
+                
+                # Process final results if available
+                if finals_data and not final_results_file.exists():
+                    # print the final object if it is of type list
+                    if isinstance(finals_data.get('final', {}), list):
+                        pass
+                    else:
+                        # Store the main final results data
+                        final_id = f"{original_regatta_id}_{original_event_id}"
+                        final_results_file = self.dirs['final_results'] / f"{regatta_id}" / f"{final_id}.json"
+                        self._write_json_file(finals_data, final_results_file, {
+                            'type': 'final_results',
+                            'regatta_id': regatta_id,
+                            'event_id': event_id,
+                            'final_id': final_id
+                        })
+                        final_count += 1
+                        
+                        # Extract and store race crew data separately
+                        race_crews = finals_data.get('race_crew', {})
+                        for crew_id, crew_data in race_crews.items():
+                            crew_file = self.dirs['race_crews'] / f"{regatta_id}" / f"{crew_id}.json"
+                            self._write_json_file(crew_data, crew_file, {
+                                'type': 'race_crew',
+                                'regatta_id': regatta_id,
+                                'event_id': event_id,
+                                'race_id': crew_data.get('race_id'),
+                                'crew_id': crew_id
+                            })
+                            
+                            # Store detailed timing data
+                            times = crew_data.get('times', [])
+                            for time_data in times:
+                                time_id = f"{crew_id}_{time_data.get('location_id', 'unknown')}"
+                                time_file = self.dirs['crew_times'] / f"{regatta_id}" / f"{time_id}.json"
+                                self._write_json_file(time_data, time_file, {
+                                    'type': 'crew_time',
+                                    'crew_id': crew_id,
+                                    'race_id': crew_data.get('race_id'),
+                                    'regatta_id': regatta_id,
+                                    'event_id': event_id
+                                })
+                        
+                        # Store ranking data if present
+                        event_ranking = finals_data.get('event_ranking', [])
+                        
+                        if event_ranking:
+                            ranking_file = self.dirs['rankings'] / f"{regatta_id}" / f"event_{original_event_id}.json"
+                            self._write_json_file(event_ranking, ranking_file, {
+                                'type': 'event_ranking',
+                                'event_id': original_event_id,
+                                'regatta_id': original_regatta_id
+                            })
+                
+                # Process rounds if they exist in the event data
+                if finals_data and not rounds_file.exists():
+                    # print the round object if it is of type list
+                    if isinstance(finals_data.get('round', {}), list):
+                        pass
+                    else:
+                        for round_info in finals_data.get('round', {}).values():
+                            round_id = round_info.get('id')
+                            if round_id:
+                                round_data = self._fetch_json(f"{self.base_url}/{original_regatta_id}/event/{original_event_id}/round/{round_id}")
+                                if round_data:
+                                    db_round_id = self._to_uuid(round_id)
+                                    if db_round_id:
+                                        file_path = self.dirs['rounds'] / f"{regatta_id}" / f"{db_round_id}.json"
+                                        self._write_json_file(round_data, file_path, {
+                                            'type': 'round',
+                                            'event_id': event_id,
+                                            'regatta_id': regatta_id
+                                        })
+                                        round_count += 1
                 
                 return entry_count, final_count, round_count
                     
             except Exception as e:
                 logger.warning(f"Failed to process event {event_file_path}: {e}")
+                # show line of error
+                print(traceback.format_exc())
                 return 0, 0, 0
         
         # Process events in parallel
@@ -609,7 +644,6 @@ class TimeTeamDataScraper:
                 'entries': len(list(self.dirs['entries'].glob('*.json'))),
                 'finals': len(list(self.dirs['finals'].glob('*.json'))),
                 'rounds': len(list(self.dirs['rounds'].glob('*.json'))),
-                'communications': len(list(self.dirs['communications'].glob('*.json'))),
                 'clubs': len(list(self.dirs['clubs'].glob('*.json'))),
                 'members': len(list(self.dirs['members'].glob('*.json'))),
                 'final_results': len(list(self.dirs['final_results'].glob('*.json'))),
@@ -624,7 +658,6 @@ class TimeTeamDataScraper:
                 'entries': str(self.dirs['entries']),
                 'finals': str(self.dirs['finals']),
                 'rounds': str(self.dirs['rounds']),
-                'communications': str(self.dirs['communications']),
                 'clubs': str(self.dirs['clubs']),
                 'members': str(self.dirs['members']),
                 'final_results': str(self.dirs['final_results']),
@@ -648,17 +681,17 @@ class TimeTeamDataScraper:
         start_time = datetime.now()
         
         try:
-            # Step 1: Always fetch all regattas
-            print("\n" + "="*50)
-            print("STEP 1: Fetching all regattas")
-            print("="*50)
-            self.fetch_all_regattas()
+            # # Step 1: Always fetch all regattas
+            # print("\n" + "="*50)
+            # print("STEP 1: Fetching all regattas")
+            # print("="*50)
+            # self.fetch_all_regattas()
             
-            # Step 2: Scrape unscanned regattas
-            print("\n" + "="*50)
-            print("STEP 2: Scraping unscanned regattas")
-            print("="*50)
-            self.scrape_unscanned_regattas()
+            # # Step 2: Scrape unscanned regattas
+            # print("\n" + "="*50)
+            # print("STEP 2: Scraping unscanned regattas")
+            # print("="*50)
+            # self.scrape_unscanned_regattas()
             
             # Step 3: Scrape event details
             print("\n" + "="*50)

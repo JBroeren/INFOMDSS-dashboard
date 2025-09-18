@@ -12,7 +12,7 @@ services:
             - NAME=Flask-App
             - PYTHONPATH=/app
             # Database connection strings
-            - POSTGRES_URL=postgresql://student:infomdss@db_dashboard:5432/dashboard
+            - POSTGRES_URL=postgresql://student:infomdss@db_dashboard:5432/knrb_dashboard
             - MONGODB_URL=mongodb://mongo:27017/knrb_dashboard
         working_dir: /app
         depends_on:
@@ -29,12 +29,12 @@ services:
         environment:
             - POSTGRES_USER=student
             - POSTGRES_PASSWORD=infomdss
-            - POSTGRES_DB=dashboard
+            - POSTGRES_DB=knrb_dashboard
         volumes:
             - db_dashboard-data:/var/lib/postgresql/data/
         container_name: db_dashboard
         healthcheck:
-            test: [ "CMD-SHELL", "pg_isready -U student -d dashboard" ]
+            test: [ "CMD-SHELL", "pg_isready -U student -d knrb_dashboard" ]
             interval: 3s
             timeout: 60s
             retries: 10
@@ -67,7 +67,7 @@ services:
             - ADMINER_DEFAULT_SERVER=db_dashboard
             - ADMINER_DEFAULT_USER=student
             - ADMINER_DEFAULT_PASSWORD=infomdss
-            - ADMINER_DEFAULT_DB=dashboard
+            - ADMINER_DEFAULT_DB=knrb_dashboard
         depends_on:
             db_dashboard:
                 condition: service_healthy
@@ -119,6 +119,7 @@ services:
         # command: ["python", "time_team_scraper.py"]
 
         # JSON Importer Service (run once or on-demand)
+        # docker compose build json-importer
         # docker compose --profile importer run --rm json-importer
     json-importer:
         build:
@@ -127,7 +128,7 @@ services:
         environment:
             # Database connection
             - DB_HOST=db_dashboard
-            - DB_NAME=dashboard
+            - DB_NAME=knrb_dashboard
             - DB_USER=student
             - DB_PASSWORD=infomdss
             - DB_PORT=5432
