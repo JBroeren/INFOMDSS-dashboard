@@ -188,6 +188,10 @@ class KNRBPerson(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True)
     name = Column(String(256), nullable=False)
+    sculling_points_total = Column(Integer, nullable=True)
+    sweeping_points_total = Column(Integer, nullable=True)
+    year_of_birth = Column(Integer, nullable=True)
+    current_rowing_club = Column(String(256), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
@@ -207,6 +211,9 @@ class KNRBRower(Base):
     crew_id = Column(Integer, ForeignKey('knrb_crews.id'), nullable=False)
     person_id = Column(UUID(as_uuid=True), ForeignKey('knrb_persons.id'), nullable=False)
     name = Column(String(256), nullable=False)
+    position = Column(Integer, nullable=True)
+    points_at_time_of_race_sculling = Column(Integer, nullable=True)
+    points_at_time_of_race_sweeping = Column(Integer, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
