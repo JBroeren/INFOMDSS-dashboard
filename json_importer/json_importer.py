@@ -46,7 +46,7 @@ logger = logging.getLogger(__name__)
 # Database configuration
 DB_CONFIG = {
     'host': os.getenv('DB_HOST', 'localhost'),
-    'database': os.getenv('DB_NAME', 'scraped_data'),
+    'database': os.getenv('DB_NAME', 'knrb_dashboard'),
     'user': os.getenv('DB_USER', 'postgres'),
     'password': os.getenv('DB_PASSWORD', 'password'),
     'port': os.getenv('DB_PORT', '5432')
@@ -184,7 +184,7 @@ class JSONKNRBImporter:
             tournament_type = tournament_metadata.get('tournamentTypeName')
             tournament_first_date = datetime.strptime(tournament_data.get('firstTournamentDate'), '%Y-%m-%dT%H:%M:%S')
             tournament_last_date = datetime.strptime(tournament_data.get('lastTournamentDate'), '%Y-%m-%dT%H:%M:%S')
-            tournament_season_id = self._to_int(tournament_metadata.get('season_id'))
+            tournament_season_id = tournament_data.get('seasonId')
 
             # create the tournament object
             tournament_object = KNRBTournament(

@@ -123,7 +123,7 @@ class KNRBDataScraper:
                 if response.status_code == 404:
                     if attempt < max_retries - 1:
                         logger.warning(f"404 error for {url}, retrying... (attempt {attempt + 1}/{max_retries})")
-                        time.sleep(1)  # Wait 1 second before retry
+                        # time.sleep(1)  # Wait 1 second before retry
                         continue
                     return None
                 response.raise_for_status()
@@ -131,7 +131,7 @@ class KNRBDataScraper:
             except Exception as e:
                 if attempt < max_retries - 1:
                     logger.warning(f"Failed to fetch {url} (attempt {attempt + 1}/{max_retries}): {e}")
-                    time.sleep(1)  # Wait 1 second before retry
+                    # time.sleep(1)  # Wait 1 second before retry
                     continue
                 logger.warning(f"Failed to fetch {url} after {max_retries} attempts: {e}")
                 return None

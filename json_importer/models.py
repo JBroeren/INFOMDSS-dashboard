@@ -58,12 +58,12 @@ class KNRBMatch(Base):
     __tablename__ = 'knrb_matches'
     
     id = Column(Integer, primary_key=True)
-    match_number = Column(Integer, nullable=False)
+    match_number = Column(Integer, nullable=True)
     tournament_id = Column(Integer, ForeignKey('knrb_tournaments.id'), nullable=False)
-    code = Column(String(32), nullable=False)
+    code = Column(String(64), nullable=False)
     name = Column(String(256), nullable=False)
-    boat_category_code = Column(String(32), nullable=False)
-    match_generated_code = Column(String(32), nullable=False)
+    boat_category_code = Column(String(64), nullable=False)
+    match_generated_code = Column(String(64), nullable=False)
     match_category_name = Column(String(256), nullable=True)
     boat_category_name = Column(String(256), nullable=False)
     gender_type = Column(String(32), nullable=False)
@@ -73,7 +73,7 @@ class KNRBMatch(Base):
     full_name = Column(String(512), nullable=False)
     full_name_with_addition = Column(String(512), nullable=False)
     name_with_addition = Column(String(256), nullable=False)
-    code_with_addition = Column(String(32), nullable=False)
+    code_with_addition = Column(String(64), nullable=False)
     
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
